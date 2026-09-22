@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -36,7 +37,7 @@ public class AnimalData
 /// a OnAnimalResolved para recolectar los datos de la ronda.
 /// </summary>
 [RequireComponent(typeof(SpriteRenderer))]
-[RequireComponent(typeof(Collider2D))]
+[RequireComponent(typeof(PolygonCollider2D))]
 public class Animal : MonoBehaviour
 {
     // DataCollector se suscribe a este evento estático para recibir el resultado
@@ -44,6 +45,13 @@ public class Animal : MonoBehaviour
     public static event Action<AnimalData> OnAnimalResolved;
 
     [SerializeField] private SpriteRenderer spriteRenderer;
+    [SerializeField] private PolygonCollider2D polygonCollider;
+
+    [Header("Sprites por tipo de animal")]
+    [SerializeField] private Sprite conejoSprite;
+    [SerializeField] private Sprite leonSprite;
+    [SerializeField] private Sprite patoSprite;
+    [SerializeField] private Sprite tortugaSprite;
 
     private int id;
     private Color colorValue;
@@ -57,6 +65,11 @@ public class Animal : MonoBehaviour
         if (spriteRenderer == null)
         {
             spriteRenderer = GetComponent<SpriteRenderer>();
+        }
+
+        if (polygonCollider == null)
+        {
+            polygonCollider = GetComponent<PolygonCollider2D>();
         }
     }
 
@@ -93,9 +106,66 @@ public class Animal : MonoBehaviour
 
         spriteRenderer.color = color;
         transform.localScale = Vector3.one * size;
+        spriteRenderer.sprite = GetSpriteForType(type);
+        UpdateColliderToMatchSprite();
+    }
 
-        // TODO: cuando existan los sprites de conejo/león/pato/tortuga,
-        // asignar aquí spriteRenderer.sprite según 'type'.
+    /// <summary>
+    /// Regenera la forma del PolygonCollider2D a partir del contorno real del
+    /// sprite asignado. Es necesario porque Unity NO actualiza el collider
+    /// automáticamente cuando el sprite se cambia por código en runtime.
+    /// Requiere que el sprite tenga "Generate Physics Shape" activado en su
+    /// configuración de importación (Inspector del archivo .png en Unity).
+    /// </summary>
+    private void UpdateColliderToMatchSprite()
+    {
+        Sprite sprite = spriteRenderer.sprite;
+        if (polygonCollider == null || sprite == null)
+        {
+            return;
+        }
+
+        int shapeCount = sprite.GetPhysicsShapeCount();
+        if (shapeCount == 0)
+        {
+            Debug.LogWarning($"Animal: el sprite '{sprite.name}' no tiene Physics Shape generado. " +
+                              "Actívalo en su configuración de importación (Generate Physics Shape) para que la hitbox funcione.");
+            return;
+        }
+
+        var path = new List<Vector2>();
+        polygonCollider.pathCount = shapeCount;
+
+        for (int i = 0; i < shapeCount; i++)
+        {
+            path.Clear();
+            sprite.GetPhysicsShape(i, path);
+            polygonCollider.SetPath(i, path);
+        }
+    }
+
+    /// <summary>
+    /// Devuelve el sprite correspondiente al tipo de animal. El color y el
+    /// contorno del sprite se mantienen fijos en el arte; solo el relleno
+    /// blanco es el que recibe el tinte de spriteRenderer.color.
+    /// </summary>
+    private Sprite GetSpriteForType(AnimalType type)
+    {
+        Sprite result = type switch
+        {
+            AnimalType.Conejo => conejoSprite,
+            AnimalType.Leon => leonSprite,
+            AnimalType.Pato => patoSprite,
+            AnimalType.Tortuga => tortugaSprite,
+            _ => null
+        };
+
+        if (result == null)
+        {
+            Debug.LogWarning($"Animal: no hay sprite asignado para el tipo {type} en el prefab.");
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -143,7 +213,7 @@ public class Animal : MonoBehaviour
             Color = colorValue,
             Tamaño = tamaño,
             Tipo_Animal = tipoAnimal,
-            Tiempo_Sobrevivido = GameManager.Instance != null ? GameManager.Instance.roundDuration : 10f,
+            Tiempo_Sobrevivido = GameManager.Instance != null ? GameManager.Instance.RoundDuration : 10f,
             Fue_Eliminado = false
         };
 

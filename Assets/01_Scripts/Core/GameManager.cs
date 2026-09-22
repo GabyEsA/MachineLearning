@@ -15,6 +15,7 @@ public class GameManager : MonoBehaviour
     [Header("Configuración de Ronda")]
     [SerializeField] public float roundDuration = 10f;
     [SerializeField] public float delayBetweenRounds = 2f;
+
     public enum GameState
     {
         WaitingToStart,
@@ -27,6 +28,9 @@ public class GameManager : MonoBehaviour
     public int CurrentRound { get; private set; } = 0;
     public float TimeRemaining { get; private set; }
 
+    // Expuesto para que otros scripts (ej. Animal.cs) no hardcodeen la duración de ronda.
+    public float RoundDuration => roundDuration;
+
     // --- Eventos ---
     // AnimalManager se suscribe a OnRoundStart para hacer el spawn de la ronda.
     public event Action<int> OnRoundStart;
@@ -38,7 +42,14 @@ public class GameManager : MonoBehaviour
     // UI/HUD se suscribe a OnTimerTick para actualizar el contador visual.
     public event Action<float> OnTimerTick;
 
+    // DataCollector se suscribe aquí (en vez de a OnRoundEnd) para finalizar y
+    // entregar el lote de datos de la ronda: se dispara justo después de
+    // OnRoundEnd, así que para este punto TODOS los animales (incluidos los
+    // sobrevivientes, que también escuchan OnRoundEnd) ya se resolvieron.
+    public event Action<int> OnRoundDataReady;
+
     private Coroutine roundLoopCoroutine;
+
     private void Awake()
     {
         // Singleton simple: si ya existe una instancia, esta se destruye.
@@ -50,7 +61,7 @@ public class GameManager : MonoBehaviour
         Instance = this;
     }
 
-    void Start()
+    private void Start()
     {
         StartGame();
     }
@@ -108,13 +119,14 @@ public class GameManager : MonoBehaviour
         CurrentState = GameState.RoundEnd;
         OnRoundEnd?.Invoke(CurrentRound);
 
-        // A partir de aquí, EvolutionCore (suscrito a OnRoundEnd) procesa
+        // Para este punto, OnRoundEnd ya terminó de propagarse a TODOS sus
+        // suscriptores de forma síncrona (incluyendo cada Animal vivo, que
+        // se resuelve como sobreviviente al recibir este mismo evento).
+        // Por eso es seguro avisar aquí que los datos de la ronda están completos.
+        OnRoundDataReady?.Invoke(CurrentRound);
+
+        // A partir de aquí, EvolutionCore (suscrito a OnRoundDataReady) procesa
         // los datos y prepara los parámetros para la siguiente ronda.
         CurrentState = GameState.Adapting;
-    }
-    // Update is called once per frame
-    void Update()
-    {
-        
     }
 }

@@ -40,6 +40,14 @@ public class AnimalManager : MonoBehaviour
     [SerializeField] private Vector2 spawnAreaMin = new Vector2(-8f, -4f);
     [SerializeField] private Vector2 spawnAreaMax = new Vector2(8f, 4f);
 
+    [Header("Prevención de overlap entre animales")]
+    [Tooltip("Radio aproximado de un animal con tamaño=1, en unidades de Unity. Ajusta este valor según el tamaño real de tus sprites importados.")]
+    [SerializeField] private float baseSpriteRadius = 0.5f;
+    [Tooltip("Espacio extra entre animales, además de la suma de sus radios (1 = sin espacio extra, 1.2 = 20% más de separación).")]
+    [SerializeField] private float spacingPadding = 1.15f;
+    [Tooltip("Intentos máximos para encontrar una posición válida antes de colocar el animal igual, aunque quede algo de overlap.")]
+    [SerializeField] private int maxPlacementAttempts = 30;
+
     [Header("Parámetros iniciales (Ronda 0, sin historial previo)")]
     [SerializeField] private float initialMeanSize = 1f;
     [SerializeField] private float initialStdDevSize = 0.4f;
@@ -50,6 +58,16 @@ public class AnimalManager : MonoBehaviour
     private SpawnParameters currentParams;
     private int nextId = 0;
     private readonly List<Animal> activeAnimals = new List<Animal>();
+    private readonly List<(Vector2 position, float size)> placedThisRound = new List<(Vector2, float)>();
+    private readonly List<float> currentRoundHues = new List<float>();
+
+    // El HUD lee esto para mostrar el % de parecido al fondo de los animales
+    // realmente generados en la ronda actual (promedio circular de hue).
+    public float CurrentRoundMeanHue => HueUtils.CircularMean(currentRoundHues);
+
+    // EvolutionCore lee esto para conservar minSize/maxSize (y cualquier otro
+    // valor que no evolucione) al construir los SpawnParameters de la siguiente ronda.
+    public SpawnParameters CurrentParameters => currentParams;
 
     private void Awake()
     {
@@ -106,6 +124,8 @@ public class AnimalManager : MonoBehaviour
     private void SpawnRound()
     {
         activeAnimals.Clear();
+        placedThisRound.Clear();
+        currentRoundHues.Clear();
         int count = UnityEngine.Random.Range(minAnimalsPerRound, maxAnimalsPerRound + 1);
 
         for (int i = 0; i < count; i++)
@@ -116,30 +136,69 @@ public class AnimalManager : MonoBehaviour
 
     private void SpawnSingleAnimal()
     {
-        // NOTA: posición completamente aleatoria por ahora, sin chequeo de overlap.
-        // Si en testing se ven muchos animales superpuestos, se puede refinar
-        // con un sistema simple de grilla o de reintento por distancia mínima.
-        Vector2 position = new Vector2(
-            UnityEngine.Random.Range(spawnAreaMin.x, spawnAreaMax.x),
-            UnityEngine.Random.Range(spawnAreaMin.y, spawnAreaMax.y)
-        );
-
-        Animal instance = Instantiate(animalPrefab, position, Quaternion.identity, transform);
-
         float size = SampleGaussianClamped(currentParams.meanSize, currentParams.stdDevSize, currentParams.minSize, currentParams.maxSize);
-        Color color = SampleColor();
+        float hue = SampleGaussianClamped(currentParams.meanHue, currentParams.stdDevHue, 0f, 1f);
+        Color color = Color.HSVToRGB(hue, 0.8f, 0.9f);
         AnimalType type = SampleType();
 
+        currentRoundHues.Add(hue);
+
+        Vector2 position = FindValidPosition(size);
+
+        Animal instance = Instantiate(animalPrefab, position, Quaternion.identity, transform);
         instance.Initialize(nextId, color, size, type);
         nextId++;
 
         activeAnimals.Add(instance);
+        placedThisRound.Add((position, size));
     }
 
-    private Color SampleColor()
+    /// <summary>
+    /// Busca, por rechazo (rejection sampling), una posición aleatoria dentro del
+    /// área de spawn que no se superponga con los animales ya colocados en esta
+    /// misma ronda. Si no encuentra ninguna válida tras maxPlacementAttempts,
+    /// devuelve el último candidato igual, para garantizar que siempre se
+    /// complete la cantidad de animales de la ronda (con algo de overlap como
+    /// último recurso, en vez de dejar animales sin spawnear).
+    /// </summary>
+    private Vector2 FindValidPosition(float size)
     {
-        float hue = SampleGaussianClamped(currentParams.meanHue, currentParams.stdDevHue, 0f, 1f);
-        return Color.HSVToRGB(hue, 0.8f, 0.9f);
+        Vector2 candidate = Vector2.zero;
+
+        for (int attempt = 0; attempt < maxPlacementAttempts; attempt++)
+        {
+            candidate = new Vector2(
+                UnityEngine.Random.Range(spawnAreaMin.x, spawnAreaMax.x),
+                UnityEngine.Random.Range(spawnAreaMin.y, spawnAreaMax.y)
+            );
+
+            if (IsPositionValid(candidate, size))
+            {
+                return candidate;
+            }
+        }
+
+        // No se encontró una posición completamente libre de overlap: se usa el
+        // último candidato de todas formas, priorizando completar la ronda.
+        return candidate;
+    }
+
+    private bool IsPositionValid(Vector2 candidate, float size)
+    {
+        float radiusNew = size * baseSpriteRadius;
+
+        foreach (var (existingPosition, existingSize) in placedThisRound)
+        {
+            float radiusExisting = existingSize * baseSpriteRadius;
+            float minDistance = (radiusNew + radiusExisting) * spacingPadding;
+
+            if (Vector2.Distance(candidate, existingPosition) < minDistance)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private AnimalType SampleType()
