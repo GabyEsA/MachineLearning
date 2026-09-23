@@ -2,16 +2,22 @@ using TMPro;
 using UnityEngine;
 
 /// <summary>
-/// HUD del juego: número de ronda y timer siempre visibles, más una métrica
-/// opcional de debug (distancia entre el color promedio de los enemigos y el
-/// color de fondo de la cámara) para evidenciar el camuflaje. La métrica está
-/// deshabilitada por defecto y se activa desde el Inspector.
+/// HUD del juego: muestra ronda, timer y puntaje en pantalla en todo momento,
+/// más una métrica opcional de debug/evidencia — el % de parecido de color
+/// entre los animales de la ronda actual y el fondo — pensada para demostrar
+/// visualmente que el camuflaje está ocurriendo a lo largo de las rondas.
+///
+/// Este script es puramente de presentación: no calcula nada por su cuenta
+/// (salvo el % de parecido, que combina datos que ya existen en otros
+/// módulos), solo escucha eventos de GameManager y AnimalManager y actualiza
+/// los textos de TextMesh Pro correspondientes.
 /// </summary>
 public class HUD : MonoBehaviour
 {
     [Header("Referencias de texto (TextMesh Pro)")]
     [SerializeField] private TMP_Text roundText;
     [SerializeField] private TMP_Text timerText;
+    [SerializeField] private TMP_Text scoreText;
     [SerializeField] private TMP_Text colorDistanceText;
 
     [Header("Referencias de sistema")]
@@ -27,6 +33,7 @@ public class HUD : MonoBehaviour
         {
             GameManager.Instance.OnRoundStart += HandleRoundStart;
             GameManager.Instance.OnTimerTick += HandleTimerTick;
+            GameManager.Instance.OnScoreChanged += HandleScoreChanged;
         }
 
         UpdateColorDistanceVisibility();
@@ -38,20 +45,24 @@ public class HUD : MonoBehaviour
         {
             GameManager.Instance.OnRoundStart -= HandleRoundStart;
             GameManager.Instance.OnTimerTick -= HandleTimerTick;
+            GameManager.Instance.OnScoreChanged -= HandleScoreChanged;
         }
     }
 
     private void Update()
     {
-        // Se actualiza por frame (no solo por evento) porque el promedio de hue
-        // de la ronda actual en AnimalManager cambia apenas se spawnea una
-        // nueva tanda; así el HUD siempre refleja el valor más reciente.
+        // Se actualiza por frame (no solo por evento) porque
+        // AnimalManager.CurrentRoundMeanHue cambia apenas se spawnea una
+        // nueva tanda de animales, y ese cambio no dispara ningún evento
+        // propio; revisarlo cada frame es la forma más simple de que el HUD
+        // siempre refleje el valor más reciente sin acoplar AnimalManager a la UI.
         if (showColorDistanceMetric)
         {
             UpdateColorDistanceText();
         }
     }
 
+    /// <summary>Actualiza el texto de ronda. Suscrito a GameManager.OnRoundStart.</summary>
     private void HandleRoundStart(int roundNumber)
     {
         if (roundText != null)
@@ -60,6 +71,7 @@ public class HUD : MonoBehaviour
         }
     }
 
+    /// <summary>Actualiza el texto del timer. Suscrito a GameManager.OnTimerTick (se dispara cada frame durante la ronda).</summary>
     private void HandleTimerTick(float timeRemaining)
     {
         if (timerText != null)
@@ -68,6 +80,23 @@ public class HUD : MonoBehaviour
         }
     }
 
+    /// <summary>Actualiza el texto de puntaje. Suscrito a GameManager.OnScoreChanged.</summary>
+    private void HandleScoreChanged(int score)
+    {
+        if (scoreText != null)
+        {
+            scoreText.text = $"Puntaje: {score}";
+        }
+    }
+
+    /// <summary>
+    /// Calcula y muestra el % de parecido entre el color promedio de los
+    /// animales de la ronda actual (AnimalManager.CurrentRoundMeanHue) y el
+    /// color de fondo de la cámara, usando distancia circular de hue (ver
+    /// HueUtils) para que el resultado sea correcto incluso con fondos cerca
+    /// del rojo puro (donde una resta simple de hue daría un valor erróneo).
+    /// 100% = mismo color exacto, 0% = colores opuestos en la rueda de color.
+    /// </summary>
     private void UpdateColorDistanceText()
     {
         if (colorDistanceText == null || animalManager == null)
@@ -81,8 +110,9 @@ public class HUD : MonoBehaviour
     }
 
     /// <summary>
-    /// Lee el hue directamente del color de fondo de la Main Camera, así no hay
-    /// que mantener un valor duplicado sincronizado a mano en el Inspector.
+    /// Lee el hue directamente del color de fondo de la Main Camera, en vez
+    /// de pedir que se duplique ese valor a mano en el Inspector del HUD —
+    /// así nunca puede desincronizarse del color real configurado en la cámara.
     /// </summary>
     private float GetBackgroundHue()
     {
@@ -96,8 +126,9 @@ public class HUD : MonoBehaviour
     }
 
     /// <summary>
-    /// Permite alternar la métrica en runtime (ej. desde un botón de debug),
-    /// además del toggle inicial del Inspector.
+    /// Permite alternar la métrica de parecido al fondo en runtime (por
+    /// ejemplo, desde un botón de debug en pantalla), además del toggle
+    /// inicial disponible en el Inspector.
     /// </summary>
     public void SetColorDistanceMetricVisible(bool visible)
     {
@@ -105,6 +136,7 @@ public class HUD : MonoBehaviour
         UpdateColorDistanceVisibility();
     }
 
+    /// <summary>Muestra u oculta el GameObject del texto de % de parecido, según el toggle actual.</summary>
     private void UpdateColorDistanceVisibility()
     {
         if (colorDistanceText != null)
